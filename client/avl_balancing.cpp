@@ -2,6 +2,10 @@
 
 void Client::rotate_right_right(std::vector<ORAMBlock>& avl_history,
                                 int cur_node_index) {
+  // --------------------------------------------------------------------------
+  // Phase 1: Node A (cur_node_index) adopts Node B's (cur_node_index + 1)
+  // left child as its new right child.
+  // --------------------------------------------------------------------------
   avl_history[cur_node_index].data.r_child_ptr =
       avl_history[cur_node_index + 1].data.l_child_ptr;
   avl_history[cur_node_index].data.r_height =
@@ -14,6 +18,8 @@ void Client::rotate_right_right(std::vector<ORAMBlock>& avl_history,
       avl_history[cur_node_index + 1].data.l_min_key_count;
   avl_history[cur_node_index].data.r_min_key_subtree =
       avl_history[cur_node_index + 1].data.l_min_key_subtree;
+
+  // Check if the min of the new right subtree straddles A's key
   if (avl_history[cur_node_index].data.r_min_key_subtree ==
       avl_history[cur_node_index].data.key) {
     avl_history[cur_node_index].data.r_same_key_size =
@@ -22,11 +28,16 @@ void Client::rotate_right_right(std::vector<ORAMBlock>& avl_history,
     avl_history[cur_node_index].data.r_same_key_size = 0;
   }
 
+  // --------------------------------------------------------------------------
+  // Phase 2: Node B (cur_node_index + 1) adopts Node A as its new left child.
+  // --------------------------------------------------------------------------
   avl_history[cur_node_index + 1].data.l_child_ptr =
       avl_history[cur_node_index].header;
   avl_history[cur_node_index + 1].data.l_height =
       1 + std::max(avl_history[cur_node_index].data.l_height,
                    avl_history[cur_node_index].data.r_height);
+
+  // Calculate B's new l_same_key_size based on A's updated state
   if (avl_history[cur_node_index].data.r_max_key_count != 0) {
     if (avl_history[cur_node_index].data.r_max_key_subtree ==
         avl_history[cur_node_index + 1].data.key) {
@@ -53,9 +64,11 @@ void Client::rotate_right_right(std::vector<ORAMBlock>& avl_history,
     }
   }
 
-  // 1. Calculate MAX Key for B's new Left Child (A)
+  // --------------------------------------------------------------------------
+  // Phase 3: Calculate MAX Key for B's new Left Child (A)
   // Logic: Check A's Right Subtree (which was just updated).
   // If it exists, that's the Max. Otherwise, A itself is the Max.
+  // --------------------------------------------------------------------------
   avl_history[cur_node_index + 1].data.l_max_key_subtree =
       (avl_history[cur_node_index].data.r_max_key_count > 0)
           ? avl_history[cur_node_index].data.r_max_key_subtree
@@ -83,8 +96,10 @@ void Client::rotate_right_right(std::vector<ORAMBlock>& avl_history,
         1 + avl_history[cur_node_index].data.l_same_key_size;
   }
 
-  // 2. Calculate MIN Key for B's new Left Child (A)
+  // --------------------------------------------------------------------------
+  // Phase 4: Calculate MIN Key for B's new Left Child (A)
   // Logic: Check A's Left Subtree (untouched by rotation).
+  // --------------------------------------------------------------------------
   avl_history[cur_node_index + 1].data.l_min_key_subtree =
       (avl_history[cur_node_index].data.l_min_key_count > 0)
           ? avl_history[cur_node_index].data.l_min_key_subtree
@@ -110,11 +125,17 @@ void Client::rotate_right_right(std::vector<ORAMBlock>& avl_history,
         1 + avl_history[cur_node_index].data.r_same_key_size;
   }
 
+  // --------------------------------------------------------------------------
+  // Phase 5: Swap nodes in history to reflect new structure, and update
+  // parent pointers (or root).
+  // --------------------------------------------------------------------------
   std::swap(avl_history[cur_node_index + 1], avl_history[cur_node_index]);
 
   if (cur_node_index == 0) {
+    // Node is at the top, so it becomes the new root
     root = avl_history[cur_node_index].header;
   } else {
+    // Link the parent node (cur_node_index - 1) to the new subtree root
     if (!avl_history[cur_node_index - 1].data.r_child_ptr.is_null &&
         avl_history[cur_node_index - 1].data.r_child_ptr.block_id ==
             avl_history[cur_node_index + 1].header.block_id) {
@@ -127,9 +148,13 @@ void Client::rotate_right_right(std::vector<ORAMBlock>& avl_history,
   }
 }
 
+
 void Client::rotate_left_left(std::vector<ORAMBlock>& avl_history,
                               int cur_node_index) {
-  // 1. A (old root) adopts B's right child as its new left child
+  // --------------------------------------------------------------------------
+  // Phase 1: Node A (old root/cur_node_index) adopts Node B's right child
+  // as its new left child.
+  // --------------------------------------------------------------------------
   avl_history[cur_node_index].data.l_child_ptr =
       avl_history[cur_node_index + 1].data.r_child_ptr;
   avl_history[cur_node_index].data.l_height =
@@ -152,7 +177,10 @@ void Client::rotate_left_left(std::vector<ORAMBlock>& avl_history,
     avl_history[cur_node_index].data.l_same_key_size = 0;
   }
 
-  // 2. B (new root) adopts A as its new right child
+  // --------------------------------------------------------------------------
+  // Phase 2: Node B (new root/cur_node_index + 1) adopts Node A as its
+  // new right child.
+  // --------------------------------------------------------------------------
   avl_history[cur_node_index + 1].data.r_child_ptr =
       avl_history[cur_node_index].header;
   avl_history[cur_node_index + 1].data.r_height =
@@ -186,8 +214,10 @@ void Client::rotate_left_left(std::vector<ORAMBlock>& avl_history,
     }
   }
 
-  // 3. Calculate MIN Key for B's new Right Child (A)
+  // --------------------------------------------------------------------------
+  // Phase 3: Calculate MIN Key for B's new Right Child (A)
   // Logic: Check A's Left Subtree (which was just updated).
+  // --------------------------------------------------------------------------
   avl_history[cur_node_index + 1].data.r_min_key_subtree =
       (avl_history[cur_node_index].data.l_min_key_count > 0)
           ? avl_history[cur_node_index].data.l_min_key_subtree
@@ -210,8 +240,10 @@ void Client::rotate_left_left(std::vector<ORAMBlock>& avl_history,
         1 + avl_history[cur_node_index].data.r_same_key_size;
   }
 
-  // 4. Calculate MAX Key for B's new Right Child (A)
+  // --------------------------------------------------------------------------
+  // Phase 4: Calculate MAX Key for B's new Right Child (A)
   // Logic: Check A's Right Subtree (untouched by rotation).
+  // --------------------------------------------------------------------------
   avl_history[cur_node_index + 1].data.r_max_key_subtree =
       (avl_history[cur_node_index].data.r_max_key_count > 0)
           ? avl_history[cur_node_index].data.r_max_key_subtree
@@ -234,6 +266,10 @@ void Client::rotate_left_left(std::vector<ORAMBlock>& avl_history,
         1 + avl_history[cur_node_index].data.l_same_key_size;
   }
 
+  // --------------------------------------------------------------------------
+  // Phase 5: Swap nodes in history to reflect new structure, and update
+  // parent pointers (or root).
+  // --------------------------------------------------------------------------
   std::swap(avl_history[cur_node_index + 1], avl_history[cur_node_index]);
 
   if (cur_node_index == 0) {
@@ -251,8 +287,13 @@ void Client::rotate_left_left(std::vector<ORAMBlock>& avl_history,
   }
 }
 
+
 void Client::rotate_right_left(std::vector<ORAMBlock>& avl_history,
                                int cur_node_index) {
+  // --------------------------------------------------------------------------
+  // Phase 1: Node A (cur_node_index) adopts Node C's left child
+  // as its new right child.
+  // --------------------------------------------------------------------------
   avl_history[cur_node_index].data.r_child_ptr =
       avl_history[cur_node_index + 2].data.l_child_ptr;
   avl_history[cur_node_index].data.r_height =
@@ -265,6 +306,7 @@ void Client::rotate_right_left(std::vector<ORAMBlock>& avl_history,
       avl_history[cur_node_index + 2].data.l_max_key_subtree;
   avl_history[cur_node_index].data.r_max_key_count =
       avl_history[cur_node_index + 2].data.l_max_key_count;
+
   if (avl_history[cur_node_index].data.r_min_key_subtree ==
       avl_history[cur_node_index].data.key) {
     avl_history[cur_node_index].data.r_same_key_size =
@@ -273,6 +315,10 @@ void Client::rotate_right_left(std::vector<ORAMBlock>& avl_history,
     avl_history[cur_node_index].data.r_same_key_size = 0;
   }
 
+  // --------------------------------------------------------------------------
+  // Phase 2: Node B (cur_node_index + 1) adopts Node C's right child
+  // as its new left child.
+  // --------------------------------------------------------------------------
   avl_history[cur_node_index + 1].data.l_child_ptr =
       avl_history[cur_node_index + 2].data.r_child_ptr;
   avl_history[cur_node_index + 1].data.l_height =
@@ -285,6 +331,7 @@ void Client::rotate_right_left(std::vector<ORAMBlock>& avl_history,
       avl_history[cur_node_index + 2].data.r_max_key_subtree;
   avl_history[cur_node_index + 1].data.l_max_key_count =
       avl_history[cur_node_index + 2].data.r_max_key_count;
+
   if (avl_history[cur_node_index + 1].data.l_max_key_subtree ==
       avl_history[cur_node_index + 1].data.key) {
     avl_history[cur_node_index + 1].data.l_same_key_size =
@@ -293,7 +340,10 @@ void Client::rotate_right_left(std::vector<ORAMBlock>& avl_history,
     avl_history[cur_node_index + 1].data.l_same_key_size = 0;
   }
 
-  // 3. C (cur_node_index + 2) adopts A as its left child
+  // --------------------------------------------------------------------------
+  // Phase 3: Node C (cur_node_index + 2) adopts Node A as its left child.
+  // Calculate C's new left statistics (same key size, max, min).
+  // --------------------------------------------------------------------------
   avl_history[cur_node_index + 2].data.l_child_ptr =
       avl_history[cur_node_index].header;
   avl_history[cur_node_index + 2].data.l_height =
@@ -332,6 +382,7 @@ void Client::rotate_right_left(std::vector<ORAMBlock>& avl_history,
       (avl_history[cur_node_index].data.r_max_key_count > 0)
           ? avl_history[cur_node_index].data.r_max_key_subtree
           : avl_history[cur_node_index].data.key;
+
   if (avl_history[cur_node_index].data.r_max_key_count > 0) {
     if (avl_history[cur_node_index].data.r_max_key_subtree ==
         avl_history[cur_node_index].data.key) {
@@ -352,6 +403,7 @@ void Client::rotate_right_left(std::vector<ORAMBlock>& avl_history,
       (avl_history[cur_node_index].data.l_min_key_count > 0)
           ? avl_history[cur_node_index].data.l_min_key_subtree
           : avl_history[cur_node_index].data.key;
+
   if (avl_history[cur_node_index].data.l_min_key_count > 0) {
     if (avl_history[cur_node_index].data.l_min_key_subtree ==
         avl_history[cur_node_index].data.key) {
@@ -367,7 +419,10 @@ void Client::rotate_right_left(std::vector<ORAMBlock>& avl_history,
         1 + avl_history[cur_node_index].data.r_same_key_size;
   }
 
-  // 4. C (cur_node_index + 2) adopts B as its right child
+  // --------------------------------------------------------------------------
+  // Phase 4: Node C (cur_node_index + 2) adopts Node B as its right child.
+  // Calculate C's new right statistics (same key size, max, min).
+  // --------------------------------------------------------------------------
   avl_history[cur_node_index + 2].data.r_child_ptr =
       avl_history[cur_node_index + 1].header;
   avl_history[cur_node_index + 2].data.r_height =
@@ -406,6 +461,7 @@ void Client::rotate_right_left(std::vector<ORAMBlock>& avl_history,
       (avl_history[cur_node_index + 1].data.l_min_key_count > 0)
           ? avl_history[cur_node_index + 1].data.l_min_key_subtree
           : avl_history[cur_node_index + 1].data.key;
+
   if (avl_history[cur_node_index + 1].data.l_min_key_count > 0) {
     if (avl_history[cur_node_index + 1].data.l_min_key_subtree ==
         avl_history[cur_node_index + 1].data.key) {
@@ -426,6 +482,7 @@ void Client::rotate_right_left(std::vector<ORAMBlock>& avl_history,
       (avl_history[cur_node_index + 1].data.r_max_key_count > 0)
           ? avl_history[cur_node_index + 1].data.r_max_key_subtree
           : avl_history[cur_node_index + 1].data.key;
+
   if (avl_history[cur_node_index + 1].data.r_max_key_count > 0) {
     if (avl_history[cur_node_index + 1].data.r_max_key_subtree ==
         avl_history[cur_node_index + 1].data.key) {
@@ -441,6 +498,10 @@ void Client::rotate_right_left(std::vector<ORAMBlock>& avl_history,
         1 + avl_history[cur_node_index + 1].data.l_same_key_size;
   }
 
+  // --------------------------------------------------------------------------
+  // Phase 5: Swap nodes in history and update parent pointers (or root)
+  // for the double rotation.
+  // --------------------------------------------------------------------------
   std::swap(avl_history[cur_node_index + 2], avl_history[cur_node_index]);
 
   if (cur_node_index == 0) {
@@ -458,9 +519,13 @@ void Client::rotate_right_left(std::vector<ORAMBlock>& avl_history,
   }
 }
 
+
 void Client::rotate_left_right(std::vector<ORAMBlock>& avl_history,
                                int cur_node_index) {
-  // 1. A (cur_node_index) adopts C's right child as its new left child
+  // --------------------------------------------------------------------------
+  // Phase 1: Node A (cur_node_index) adopts Node C's right child
+  // as its new left child.
+  // --------------------------------------------------------------------------
   avl_history[cur_node_index].data.l_child_ptr =
       avl_history[cur_node_index + 2].data.r_child_ptr;
   avl_history[cur_node_index].data.l_height =
@@ -483,7 +548,10 @@ void Client::rotate_left_right(std::vector<ORAMBlock>& avl_history,
     avl_history[cur_node_index].data.l_same_key_size = 0;
   }
 
-  // 2. B (cur_node_index + 1) adopts C's left child as its new right child
+  // --------------------------------------------------------------------------
+  // Phase 2: Node B (cur_node_index + 1) adopts Node C's left child
+  // as its new right child.
+  // --------------------------------------------------------------------------
   avl_history[cur_node_index + 1].data.r_child_ptr =
       avl_history[cur_node_index + 2].data.l_child_ptr;
   avl_history[cur_node_index + 1].data.r_height =
@@ -506,7 +574,10 @@ void Client::rotate_left_right(std::vector<ORAMBlock>& avl_history,
     avl_history[cur_node_index + 1].data.r_same_key_size = 0;
   }
 
-  // 3. C (cur_node_index + 2) adopts B as its left child
+  // --------------------------------------------------------------------------
+  // Phase 3: Node C (cur_node_index + 2) adopts Node B as its left child.
+  // Calculate C's new left statistics (same key size, max, min).
+  // --------------------------------------------------------------------------
   avl_history[cur_node_index + 2].data.l_child_ptr =
       avl_history[cur_node_index + 1].header;
   avl_history[cur_node_index + 2].data.l_height =
@@ -545,6 +616,7 @@ void Client::rotate_left_right(std::vector<ORAMBlock>& avl_history,
       (avl_history[cur_node_index + 1].data.r_max_key_count > 0)
           ? avl_history[cur_node_index + 1].data.r_max_key_subtree
           : avl_history[cur_node_index + 1].data.key;
+
   if (avl_history[cur_node_index + 1].data.r_max_key_count > 0) {
     if (avl_history[cur_node_index + 1].data.r_max_key_subtree ==
         avl_history[cur_node_index + 1].data.key) {
@@ -565,6 +637,7 @@ void Client::rotate_left_right(std::vector<ORAMBlock>& avl_history,
       (avl_history[cur_node_index + 1].data.l_min_key_count > 0)
           ? avl_history[cur_node_index + 1].data.l_min_key_subtree
           : avl_history[cur_node_index + 1].data.key;
+
   if (avl_history[cur_node_index + 1].data.l_min_key_count > 0) {
     if (avl_history[cur_node_index + 1].data.l_min_key_subtree ==
         avl_history[cur_node_index + 1].data.key) {
@@ -580,7 +653,10 @@ void Client::rotate_left_right(std::vector<ORAMBlock>& avl_history,
         1 + avl_history[cur_node_index + 1].data.r_same_key_size;
   }
 
-  // 4. C (cur_node_index + 2) adopts A as its right child
+  // --------------------------------------------------------------------------
+  // Phase 4: Node C (cur_node_index + 2) adopts Node A as its right child.
+  // Calculate C's new right statistics (same key size, max, min).
+  // --------------------------------------------------------------------------
   avl_history[cur_node_index + 2].data.r_child_ptr =
       avl_history[cur_node_index].header;
   avl_history[cur_node_index + 2].data.r_height =
@@ -619,6 +695,7 @@ void Client::rotate_left_right(std::vector<ORAMBlock>& avl_history,
       (avl_history[cur_node_index].data.l_min_key_count > 0)
           ? avl_history[cur_node_index].data.l_min_key_subtree
           : avl_history[cur_node_index].data.key;
+
   if (avl_history[cur_node_index].data.l_min_key_count > 0) {
     if (avl_history[cur_node_index].data.l_min_key_subtree ==
         avl_history[cur_node_index].data.key) {
@@ -639,6 +716,7 @@ void Client::rotate_left_right(std::vector<ORAMBlock>& avl_history,
       (avl_history[cur_node_index].data.r_max_key_count > 0)
           ? avl_history[cur_node_index].data.r_max_key_subtree
           : avl_history[cur_node_index].data.key;
+
   if (avl_history[cur_node_index].data.r_max_key_count > 0) {
     if (avl_history[cur_node_index].data.r_max_key_subtree ==
         avl_history[cur_node_index].data.key) {
@@ -654,6 +732,10 @@ void Client::rotate_left_right(std::vector<ORAMBlock>& avl_history,
         1 + avl_history[cur_node_index].data.l_same_key_size;
   }
 
+  // --------------------------------------------------------------------------
+  // Phase 5: Swap nodes in history and update parent pointers (or root)
+  // for the double rotation.
+  // --------------------------------------------------------------------------
   std::swap(avl_history[cur_node_index + 2], avl_history[cur_node_index]);
 
   if (cur_node_index == 0) {

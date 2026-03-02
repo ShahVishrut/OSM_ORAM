@@ -12,6 +12,9 @@ size_t Client::size(uint64_t key) {
   cur_read.header = root;
   size_t result = 0;
 
+  // --------------------------------------------------------------------------
+  // Phase 1: Traverse the tree to find the target key
+  // --------------------------------------------------------------------------
   while (true) {
     cur_read = write_block(cur_read, false);
     history.push_back(cur_read);
@@ -19,26 +22,35 @@ size_t Client::size(uint64_t key) {
     if (key > cur_read.data.key) {
       if (cur_read.data.r_child_ptr.is_null) break;
       cur_read.header = cur_read.data.r_child_ptr;
+
     } else if (key < cur_read.data.key) {
       if (cur_read.data.l_child_ptr.is_null) break;
       cur_read.header = cur_read.data.l_child_ptr;
+
     } else {
+      // Key found: result is 1 (the node itself) + left matches + right matches
       result = 1 + cur_read.data.l_same_key_size + cur_read.data.r_same_key_size;
       break;
     }
   }
 
-  // PathORAM Write-back: Update parent pointers with new leaf_labels
+  // --------------------------------------------------------------------------
+  // Phase 2: PathORAM Write-back
+  // Update parent pointers with new leaf_labels from bottom to top
+  // --------------------------------------------------------------------------
   for (int index = (int)history.size() - 1; index >= 0; index--) {
     uint32_t new_leaf_label = write_block(history[index], true).header.leaf_label;
+
     if (index > 0) {
       if (!history[index - 1].data.l_child_ptr.is_null &&
           history[index - 1].data.l_child_ptr.block_id == history[index].header.block_id) {
         history[index - 1].data.l_child_ptr.leaf_label = new_leaf_label;
+
       } else if (!history[index - 1].data.r_child_ptr.is_null &&
                  history[index - 1].data.r_child_ptr.block_id == history[index].header.block_id) {
         history[index - 1].data.r_child_ptr.leaf_label = new_leaf_label;
       }
+
     } else {
       root.leaf_label = new_leaf_label;
     }
@@ -64,7 +76,9 @@ std::vector<uint64_t> Client::find(uint64_t key, uint32_t i, uint32_t j) {
   ODSPointer next_header_i;
   ODSPointer next_header_j;
 
-  // 1. Traverse together until i and j paths diverge
+  // --------------------------------------------------------------------------
+  // Phase 1: Traverse together until i and j paths diverge
+  // --------------------------------------------------------------------------
   while (true) {
     cur_read = write_block(cur_read, false);
     common_path.push_back(cur_read);
@@ -72,19 +86,23 @@ std::vector<uint64_t> Client::find(uint64_t key, uint32_t i, uint32_t j) {
     uint32_t next_recursive_i = recursive_i;
     uint32_t next_recursive_j = recursive_j;
 
-    // Determine next step for i
+    // --- Determine next step for i ---
     if (key > cur_read.data.key) {
       if (cur_read.data.r_child_ptr.is_null) { abort_search = true; break; }
       next_header_i = cur_read.data.r_child_ptr;
+
     } else if (key < cur_read.data.key) {
       if (cur_read.data.l_child_ptr.is_null) { abort_search = true; break; }
       next_header_i = cur_read.data.l_child_ptr;
+
     } else {
       if (cur_read.data.l_same_key_size == recursive_i) {
         found_i = true;
+
       } else if (cur_read.data.l_same_key_size > recursive_i) {
         if (cur_read.data.l_child_ptr.is_null) { abort_search = true; break; }
         next_header_i = cur_read.data.l_child_ptr;
+
       } else {
         if (cur_read.data.r_child_ptr.is_null) { abort_search = true; break; }
         next_header_i = cur_read.data.r_child_ptr;
@@ -92,19 +110,23 @@ std::vector<uint64_t> Client::find(uint64_t key, uint32_t i, uint32_t j) {
       }
     }
 
-    // Determine next step for j
+    // --- Determine next step for j ---
     if (key > cur_read.data.key) {
       if (cur_read.data.r_child_ptr.is_null) { abort_search = true; break; }
       next_header_j = cur_read.data.r_child_ptr;
+
     } else if (key < cur_read.data.key) {
       if (cur_read.data.l_child_ptr.is_null) { abort_search = true; break; }
       next_header_j = cur_read.data.l_child_ptr;
+
     } else {
       if (cur_read.data.l_same_key_size == recursive_j) {
         found_j = true;
+
       } else if (cur_read.data.l_same_key_size > recursive_j) {
         if (cur_read.data.l_child_ptr.is_null) { abort_search = true; break; }
         next_header_j = cur_read.data.l_child_ptr;
+
       } else {
         if (cur_read.data.r_child_ptr.is_null) { abort_search = true; break; }
         next_header_j = cur_read.data.r_child_ptr;
@@ -127,25 +149,30 @@ std::vector<uint64_t> Client::find(uint64_t key, uint32_t i, uint32_t j) {
   std::vector<ORAMBlock> right_bfs;
   std::vector<ORAMBlock> full_bfs;
 
-  // Only run BFS logic if the nodes were actually found
+  // --------------------------------------------------------------------------
+  // Phase 2: BFS Logic (Only run if nodes were actually found)
+  // --------------------------------------------------------------------------
   if (!abort_search) {
     std::vector<uint32_t> i_values;
     std::vector<uint32_t> j_values;
 
     ORAMBlock divergence_node = common_path.back();
 
+    // Check if the divergence node itself is a valid match
     if (divergence_node.data.key == key) {
       if (divergence_node.data.l_same_key_size >= recursive_i && 
           divergence_node.data.l_same_key_size <= recursive_j) {
         result.push_back(divergence_node.data.value);
       }
       
+      // Seed left path BFS
       if (!divergence_node.data.l_child_ptr.is_null) {
         cur_read.header = divergence_node.data.l_child_ptr;
         left_bfs.push_back(write_block(cur_read, false));
         i_values.push_back(recursive_i);
       }
       
+      // Seed right path BFS
       if (!divergence_node.data.r_child_ptr.is_null && divergence_node.data.l_same_key_size < recursive_j) {
         cur_read.header = divergence_node.data.r_child_ptr;
         right_bfs.push_back(write_block(cur_read, false));
@@ -153,7 +180,7 @@ std::vector<uint64_t> Client::find(uint64_t key, uint32_t i, uint32_t j) {
       }
     }
 
-    // 1. Process Left Path BFS
+    // --- 2a. Process Left Path BFS ---
     size_t left_idx = 0;
     while (left_idx < left_bfs.size()) {
       ORAMBlock node = left_bfs[left_idx];
@@ -190,7 +217,7 @@ std::vector<uint64_t> Client::find(uint64_t key, uint32_t i, uint32_t j) {
       }
     }
 
-    // 2. Process Right Path BFS
+    // --- 2b. Process Right Path BFS ---
     size_t right_idx = 0;
     while (right_idx < right_bfs.size()) {
       ORAMBlock node = right_bfs[right_idx];
@@ -227,7 +254,7 @@ std::vector<uint64_t> Client::find(uint64_t key, uint32_t i, uint32_t j) {
       }
     }
 
-    // 3. Process Full Subtree BFS
+    // --- 2c. Process Full Subtree BFS ---
     size_t full_idx = 0;
     while (full_idx < full_bfs.size()) {
       ORAMBlock node = full_bfs[full_idx];
@@ -247,7 +274,10 @@ std::vector<uint64_t> Client::find(uint64_t key, uint32_t i, uint32_t j) {
     }
   }
 
-  // --- Write-back logic ---
+  // --------------------------------------------------------------------------
+  // Phase 3: Write-back logic
+  // Helper to update leaf labels in parent nodes for BFS paths
+  // --------------------------------------------------------------------------
   auto check_and_update = [](std::vector<ORAMBlock>& vec, uint32_t child_block_id, uint32_t new_leaf_label) {
     for (auto& p : vec) {
       if (!p.data.l_child_ptr.is_null && p.data.l_child_ptr.block_id == child_block_id) {
@@ -262,6 +292,7 @@ std::vector<uint64_t> Client::find(uint64_t key, uint32_t i, uint32_t j) {
     return false;
   };
 
+  // Write back full_bfs
   for (int idx = (int)full_bfs.size() - 1; idx >= 0; idx--) {
     uint32_t new_leaf = write_block(full_bfs[idx], true).header.leaf_label;
     uint32_t cid = full_bfs[idx].header.block_id;
@@ -270,6 +301,7 @@ std::vector<uint64_t> Client::find(uint64_t key, uint32_t i, uint32_t j) {
     check_and_update(right_bfs, cid, new_leaf);
   }
 
+  // Write back right_bfs
   for (int idx = (int)right_bfs.size() - 1; idx >= 0; idx--) {
     uint32_t new_leaf = write_block(right_bfs[idx], true).header.leaf_label;
     uint32_t cid = right_bfs[idx].header.block_id;
@@ -278,6 +310,7 @@ std::vector<uint64_t> Client::find(uint64_t key, uint32_t i, uint32_t j) {
     }
   }
 
+  // Write back left_bfs
   for (int idx = (int)left_bfs.size() - 1; idx >= 0; idx--) {
     uint32_t new_leaf = write_block(left_bfs[idx], true).header.leaf_label;
     uint32_t cid = left_bfs[idx].header.block_id;
@@ -286,6 +319,7 @@ std::vector<uint64_t> Client::find(uint64_t key, uint32_t i, uint32_t j) {
     }
   }
   
+  // Write back common_path
   for (int idx = (int)common_path.size() - 1; idx >= 0; idx--) {
     uint32_t new_leaf = write_block(common_path[idx], true).header.leaf_label;
     if (idx > 0) {
@@ -305,6 +339,9 @@ std::vector<uint64_t> Client::find(uint64_t key, uint32_t i, uint32_t j) {
 }
 
 void Client::insert(uint64_t key, uint64_t value) {
+  // --------------------------------------------------------------------------
+  // Phase 1: Base case - Empty tree
+  // --------------------------------------------------------------------------
   if (root.is_null) {
     ORAMBlock to_write;
     to_write.header.block_id = next_available_block_id();
@@ -316,16 +353,19 @@ void Client::insert(uint64_t key, uint64_t value) {
   }
 
   std::vector<ORAMBlock> avl_history;
-
   ORAMBlock cur_read;
   cur_read.header = root;
   bool duplicate = false;
 
-  // Read AVL tree path from PathORAM and add new Node to end
+  // --------------------------------------------------------------------------
+  // Phase 2: Read AVL tree path from PathORAM and add new Node to end
+  // Traverse downward until an empty spot is found or duplicate is handled
+  // --------------------------------------------------------------------------
   while (true) {
     cur_read = write_block(cur_read, false);
     avl_history.push_back(cur_read);
 
+    // Go Right
     if (key > cur_read.data.key ||
         key == cur_read.data.key && value > cur_read.data.value) {
       if (cur_read.data.r_child_ptr.is_null) {
@@ -341,6 +381,8 @@ void Client::insert(uint64_t key, uint64_t value) {
       } else {
         cur_read.header = cur_read.data.r_child_ptr;
       }
+
+    // Go Left
     } else if (key < cur_read.data.key ||
                key == cur_read.data.key && value < cur_read.data.value) {
       if (cur_read.data.l_child_ptr.is_null) {
@@ -356,6 +398,8 @@ void Client::insert(uint64_t key, uint64_t value) {
       } else {
         cur_read.header = cur_read.data.l_child_ptr;
       }
+
+    // Duplicate Found
     } else {
       duplicate = true;
       if (!cur_read.data.l_child_ptr.is_null) {
@@ -366,52 +410,65 @@ void Client::insert(uint64_t key, uint64_t value) {
     }
   }
 
-  // Reverse traverse and update heights and rebalance the tree
+  // --------------------------------------------------------------------------
+  // Phase 3: Reverse traverse and update heights/stats, and rebalance tree
+  // --------------------------------------------------------------------------
   for (int height = 1; !duplicate && height < avl_history.size(); height++) {
     int cur_node_index = avl_history.size() - 1 - height;
 
+    // --- Update Right Child Stats ---
     if (!avl_history[cur_node_index].data.r_child_ptr.is_null &&
         avl_history[cur_node_index].data.r_child_ptr.block_id ==
             avl_history[cur_node_index + 1].header.block_id) {
+      
       avl_history[cur_node_index].data.r_height =
           1 + std::max(avl_history[cur_node_index + 1].data.l_height,
                        avl_history[cur_node_index + 1].data.r_height);
+      
       if (key < avl_history[cur_node_index].data.r_min_key_subtree) {
         avl_history[cur_node_index].data.r_min_key_subtree = key;
         avl_history[cur_node_index].data.r_min_key_count = 1;
       } else if (key == avl_history[cur_node_index].data.r_min_key_subtree) {
         avl_history[cur_node_index].data.r_min_key_count++;
       }
+      
       if (key > avl_history[cur_node_index].data.r_max_key_subtree) {
         avl_history[cur_node_index].data.r_max_key_subtree = key;
         avl_history[cur_node_index].data.r_max_key_count = 1;
       } else if (key == avl_history[cur_node_index].data.r_max_key_subtree) {
         avl_history[cur_node_index].data.r_max_key_count++;
       }
+      
       if (key == avl_history[cur_node_index].data.key) {
         avl_history[cur_node_index].data.r_same_key_size++;
       }
+
+    // --- Update Left Child Stats ---
     } else {
       avl_history[cur_node_index].data.l_height =
           1 + std::max(avl_history[cur_node_index + 1].data.l_height,
                        avl_history[cur_node_index + 1].data.r_height);
+      
       if (key < avl_history[cur_node_index].data.l_min_key_subtree) {
         avl_history[cur_node_index].data.l_min_key_subtree = key;
         avl_history[cur_node_index].data.l_min_key_count = 1;
       } else if (key == avl_history[cur_node_index].data.l_min_key_subtree) {
         avl_history[cur_node_index].data.l_min_key_count++;
       }
+      
       if (key > avl_history[cur_node_index].data.l_max_key_subtree) {
         avl_history[cur_node_index].data.l_max_key_subtree = key;
         avl_history[cur_node_index].data.l_max_key_count = 1;
       } else if (key == avl_history[cur_node_index].data.l_max_key_subtree) {
         avl_history[cur_node_index].data.l_max_key_count++;
       }
+      
       if (key == avl_history[cur_node_index].data.key) {
         avl_history[cur_node_index].data.l_same_key_size++;
       }
     }
 
+    // --- Check Balance Factor & Perform Rotations ---
     int balance_factor = avl_history[cur_node_index].data.r_height -
                          avl_history[cur_node_index].data.l_height;
 
@@ -438,7 +495,10 @@ void Client::insert(uint64_t key, uint64_t value) {
     }
   }
 
+  // --------------------------------------------------------------------------
+  // Phase 4: PathORAM Write-back
   // Write back to PathORAM in reverse order, updating new leaf references
+  // --------------------------------------------------------------------------
   for (int index = avl_history.size() - 1; index >= 0; index--) {
     uint32_t new_leaf_label =
         write_block(avl_history[index], true).header.leaf_label;
@@ -447,18 +507,22 @@ void Client::insert(uint64_t key, uint64_t value) {
         avl_history[index - 1].data.l_child_ptr.block_id ==
             avl_history[index].header.block_id) {
       avl_history[index - 1].data.l_child_ptr.leaf_label = new_leaf_label;
+
     } else if (index > 0 && !avl_history[index - 1].data.r_child_ptr.is_null &&
                avl_history[index - 1].data.r_child_ptr.block_id ==
                    avl_history[index].header.block_id) {
       avl_history[index - 1].data.r_child_ptr.leaf_label = new_leaf_label;
+
     } else if (index > 1 && !avl_history[index - 2].data.l_child_ptr.is_null &&
                avl_history[index - 2].data.l_child_ptr.block_id ==
                    avl_history[index].header.block_id) {
       avl_history[index - 2].data.l_child_ptr.leaf_label = new_leaf_label;
+
     } else if (index > 1 && !avl_history[index - 2].data.r_child_ptr.is_null &&
                avl_history[index - 2].data.r_child_ptr.block_id ==
                    avl_history[index].header.block_id) {
       avl_history[index - 2].data.r_child_ptr.leaf_label = new_leaf_label;
+
     } else if (index == 0) {
       root.leaf_label = new_leaf_label;
     }
