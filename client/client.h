@@ -87,6 +87,7 @@ public:
     void insert(uint64_t key, uint64_t value);
     size_t size(uint64_t key);
     std::vector<uint64_t> find(uint64_t key, uint32_t i, uint32_t j);
+    bool remove(uint64_t key, uint64_t value);
 
 private:
     // --- Core Path ORAM Operations ---
