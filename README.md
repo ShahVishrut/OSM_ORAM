@@ -11,7 +11,7 @@ Defines the core data structures and the `Client` class, including `ORAMBlock`, 
 Implements the core Path ORAM operations, including reading full root-to-leaf paths into the client stash and evicting blocks back down the tree to the server.
 
 **osm_functions.cpp**
-Contains the main logic for the Oblivious Sorted Multimap (OSM). This includes secure insert, size, and range-based find operations over data outsourced to the untrusted server.
+Contains the main logic for the Oblivious Sorted Multimap (OSM). This includes secure insert, removal, size, and range-based find operations over data outsourced to the untrusted server.
 
 **avl_balancing.cpp**
 Implements AVL tree rotations and updates augmented order-statistic metadata, ensuring that OSM operations maintain logarithmic worst-case time complexity.
