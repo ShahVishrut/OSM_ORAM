@@ -1,17 +1,9 @@
-#include "client/client.h" // Assuming this is your header
+#include "client/client.h" // Assuming your OSM client header
 #include <iostream>
 #include <vector>
 #include <string>
+#include <chrono>
 #include <iomanip>
-
-// Helper to easily print vectors returned by find()
-void print_vector(const std::string& label, const std::vector<uint64_t>& vec) {
-    std::cout << label << ": [";
-    for (size_t i = 0; i < vec.size(); ++i) {
-        std::cout << vec[i] << (i + 1 == vec.size() ? "" : ", ");
-    }
-    std::cout << "]\n";
-}
 
 void print_header(const std::string& text) {
     std::cout << "\n==================================================\n";
@@ -20,130 +12,98 @@ void print_header(const std::string& text) {
 }
 
 int main() {
-    // Increase capacity slightly to handle the stress tests
-    Client *my_client = new Client(500, 4); 
-    std::cout << std::boolalpha; // Print true/false instead of 1/0
+    std::cout << "Starting OSM (Oblivious Sorted Multimap) Experiments...\n";
 
-    print_header("SUITE 1: Basic Insertions & Duplicates");
-    my_client->insert(50, 66);
-    my_client->insert(10, 78);
-    my_client->insert(30, 88);
-    my_client->insert(75, 987);
-    my_client->insert(40, 984);
-    my_client->insert(45, 982);
-    my_client->insert(5, 981);
+    // We will use a single target key to host the values we are querying, 
+    // simulating a keyword search that returns multiple ranked documents.
+    const uint64_t TARGET_KEY = 42; 
+
+    // ===================================================================
+    // EXPERIMENT 1: Fixed Dataset Size (2^20), Varying Range Query Size
+    // ===================================================================
+    print_header("EXPERIMENT 1: Varying Range Size (n = 2^20)");
     
-    // Duplicate islands
-    my_client->insert(50, 67);
-    my_client->insert(50, 68);
-    my_client->insert(50, 69);
-    my_client->insert(50, 70);
-    my_client->insert(10, 79);
-    my_client->insert(10, 80);
-
-    std::cout << "Size of 10 (expected 3): " << my_client->size(10) << "\n";
-    std::cout << "Size of 50 (expected 5): " << my_client->size(50) << "\n";
-    print_vector("Find key 50, range [1, 3] (expected [67, 68, 69])", my_client->find(50, 1, 3));
-
-
-    print_header("SUITE 2: Forced AVL Rotations (Insertions)");
-    // 1. Left-Left (LL) Rotation: Insert decreasing order
-    my_client->insert(300, 1);
-    my_client->insert(200, 1);
-    my_client->insert(100, 1);
-    std::cout << "LL Rotation Test (Size 100 expected 1): " << my_client->size(100) << "\n";
-
-    // 2. Right-Right (RR) Rotation: Insert increasing order
-    my_client->insert(400, 1);
-    my_client->insert(500, 1);
-    my_client->insert(600, 1);
-    std::cout << "RR Rotation Test (Size 600 expected 1): " << my_client->size(600) << "\n";
-
-    // 3. Left-Right (LR) Rotation
-    my_client->insert(700, 1);
-    my_client->insert(650, 1);
-    my_client->insert(675, 1);
-    std::cout << "LR Rotation Test (Size 675 expected 1): " << my_client->size(675) << "\n";
-
-    // 4. Right-Left (RL) Rotation
-    my_client->insert(800, 1);
-    my_client->insert(900, 1);
-    my_client->insert(850, 1);
-    std::cout << "RL Rotation Test (Size 850 expected 1): " << my_client->size(850) << "\n";
-
-
-    print_header("SUITE 3: Basic & Duplicate Removals");
-    std::cout << "Remove(99, 100) non-existent (expected false): " << my_client->remove(99, 100) << "\n";
+    uint64_t n_exp1 = 1 << 20; // 1,048,576
     
-    std::cout << "Remove(5, 981) unique leaf  (expected true):  " << my_client->remove(5, 981) << "\n";
-    std::cout << " -> Size of 5   (expected 0):     " << my_client->size(5) << "\n";
+    // Initialize client. (Adjust to match your OSM initialization)
+    Client *client_exp1 = new Client(n_exp1, 4); 
 
-    std::cout << "Remove(50, 68) middle dup   (expected true):  " << my_client->remove(50, 68) << "\n";
-    std::cout << " -> Size of 50  (expected 4):     " << my_client->size(50) << "\n";
-    print_vector(" -> Find key 50, range [0, 3] (expected [66, 67, 69, 70])", my_client->find(50, 0, 3));
+    std::cout << "Inserting " << n_exp1 << " elements into OSM...\n";
+    for (uint64_t i = 1; i <= n_exp1; ++i) {
+        // Insert(k, v) adds v to the list Map[k] keeping its values sorted.
+        // We map all values to TARGET_KEY to build a massive list.
+        client_exp1->insert(TARGET_KEY, i); 
+        
+        // Update the same line every 100 insertions
+        if (i % 100 == 0) {
+            std::cout << "\r  -> Inserted " << i << " records..." << std::flush;
+        }
+    }
+    // Print a final newline so the next text doesn't overwrite your final count
+    std::cout << std::endl;
 
+    std::cout << "\nExecuting varying range queries on TARGET_KEY...\n";
+    std::cout << "Index Range [i, j]\tTime (ms)\tResults Fetched\n";
+    std::cout << "--------------------------------------------------\n";
 
-    print_header("SUITE 4: Total Duplicate Wipeout");
-    // Ensure that completely deleting an island doesn't break augmented stats for parents
-    my_client->insert(55, 1);
-    my_client->insert(55, 2);
-    my_client->insert(55, 3);
-    std::cout << "Initial Size of 55 (expected 3): " << my_client->size(55) << "\n";
-    std::cout << "Remove(55, 1) (expected true): " << my_client->remove(55, 1) << "\n";
-    std::cout << "Remove(55, 2) (expected true): " << my_client->remove(55, 2) << "\n";
-    std::cout << "Remove(55, 3) (expected true): " << my_client->remove(55, 3) << "\n";
-    std::cout << "Final Size of 55 (expected 0): " << my_client->size(55) << "\n";
+    // Test range sizes: 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024
+    for (uint64_t range_size = 1; range_size <= 1024; range_size *= 2) {
+        uint64_t start_index = 1; 
+        uint64_t end_index = range_size;
 
+        auto start_time = std::chrono::high_resolution_clock::now();
+        
+        // OSM.Find(k, i, j) retrieves the i-th through j-th values for key k.
+        std::vector<uint64_t> results = client_exp1->find(TARGET_KEY, start_index, end_index);
+        
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
 
-    print_header("SUITE 5: Complex 2-Child Node Removal");
-    // Build a specific subtree to force a complex in-order successor swap
-    my_client->insert(2000, 1);
-    my_client->insert(1500, 1);
-    my_client->insert(2500, 1);
-    my_client->insert(2200, 1);
-    my_client->insert(2700, 1);
-    my_client->insert(2300, 1); // 2300 is the right child of the successor (2200)
-
-    std::cout << "Size of 2000 before removal (expected 1): " << my_client->size(2000) << "\n";
-    std::cout << "Size of 2200 before removal (expected 1): " << my_client->size(2200) << "\n";
-    
-    // Removing 2000 forces the tree to swap 2200 into 2000's spot, and shift 2300 up.
-    std::cout << "Remove(2000, 1) (expected true): " << my_client->remove(2000, 1) << "\n";
-    
-    std::cout << "Size of 2000 after removal (expected 0): " << my_client->size(2000) << "\n";
-    std::cout << "Size of 2200 after removal (expected 1): " << my_client->size(2200) << "\n";
-    std::cout << "Size of 2300 after removal (expected 1): " << my_client->size(2300) << "\n";
-
-
-    print_header("SUITE 6: Sequential Stress Test");
-    // Forcing continuous Right-Right insertions and cascading rebalances
-    std::cout << "Inserting keys 3000 to 3020...\n";
-    for (int i = 0; i <= 20; i++) {
-        my_client->insert(3000 + i, i);
+        std::cout << "[" << start_index << ", " << std::setw(4) << end_index << "]\t\t" 
+                  << duration.count() << " ms\t\t" 
+                  << results.size() << "\n";
     }
     
-    bool stress_insert_success = true;
-    for (int i = 0; i <= 20; i++) {
-        if (my_client->size(3000 + i) != 1) stress_insert_success = false;
-    }
-    std::cout << "All stress inserts found? (expected true): " << stress_insert_success << "\n";
+    delete client_exp1;
 
-    // Forcing continuous removals and backward rebalances
-    std::cout << "Removing keys 3000 to 3020...\n";
-    bool stress_remove_success = true;
-    for (int i = 0; i <= 20; i++) {
-        if (!my_client->remove(3000 + i, i)) stress_remove_success = false;
-    }
-    std::cout << "All stress removals returned true? (expected true): " << stress_remove_success << "\n";
+
+    // ===================================================================
+    // EXPERIMENT 2: Varying Dataset Size, Fixed Range Query Size
+    // ===================================================================
+    print_header("EXPERIMENT 2: Varying Input Size (Fixed Interval = [1, 64])");
+
+    uint64_t fixed_start = 1;
+    uint64_t fixed_end = 64;
     
-    bool stress_cleanup_success = true;
-    for (int i = 0; i <= 20; i++) {
-        if (my_client->size(3000 + i) != 0) stress_cleanup_success = false;
+    std::cout << "Dataset (n)\tTime (ms)\tResults Fetched\n";
+    std::cout << "--------------------------------------------------\n";
+
+    // Test dataset sizes: 2^10, 2^12, 2^14, 2^16, 2^18, 2^20
+    for (int power = 10; power <= 20; power += 2) {
+        uint64_t current_n = 1 << power;
+        
+        Client *client_exp2 = new Client(current_n, 4); 
+
+        // Insert current_n elements under TARGET_KEY
+        for (uint64_t i = 1; i <= current_n; ++i) {
+            client_exp2->insert(TARGET_KEY, i);
+        }
+
+        auto start_time = std::chrono::high_resolution_clock::now();
+        
+        // Execute the fixed-size query: Find(TARGET_KEY, 1, 64)
+        std::vector<uint64_t> results = client_exp2->find(TARGET_KEY, fixed_start, fixed_end);
+        
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+
+        std::cout << "2^" << power << " (" << current_n << ")\t" 
+                  << duration.count() << " ms\t\t" 
+                  << results.size() << "\n";
+
+        delete client_exp2;
     }
-    std::cout << "All stress keys completely gone? (expected true): " << stress_cleanup_success << "\n";
 
-    print_header("TESTS COMPLETE");
-
-    delete my_client;
+    print_header("EXPERIMENTS COMPLETE");
     return 0;
 }
