@@ -119,6 +119,14 @@ private:
     // --- Block ID Management ---
     uint32_t cur_block_id = 0;
     uint32_t next_available_block_id();
+
+    // --- Padding ---
+    size_t tree_size = 0;              // Tracks the total number of nodes in your AVL tree
+    size_t current_op_accesses = 0;    // Tracks Path ORAM accesses during the current operation
+    static const uint32_t DUMMY_BLOCK_ID = 0xFFFFFFFF; 
+    void perform_dummy_access();
+    size_t get_max_tree_height();
+    void pad_operation(size_t target_accesses);
 };
 
 #endif

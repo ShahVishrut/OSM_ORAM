@@ -42,6 +42,9 @@ Client::Client(size_t num_blocks, size_t blocks_per_bucket) {
 }
 
 ORAMBlock Client::write_block(ORAMBlock to_write, bool write) {
+  // TRACKING: Increment the global access counter for the current operation
+  this->current_op_accesses++;
+
   // --------------------------------------------------------------------------
   // Phase 1: Read the entire path from the current leaf to the root into stash
   // --------------------------------------------------------------------------
@@ -219,4 +222,19 @@ void Client::evict(uint32_t leaf_num) {
 
 uint32_t Client::next_available_block_id() { 
   return cur_block_id++; 
+}
+
+void Client::perform_dummy_access() {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<uint32_t> distr(0, (1u << tree_height) - 1);
+
+  ORAMBlock dummy_block;
+  dummy_block.header.block_id = DUMMY_BLOCK_ID; 
+  dummy_block.header.leaf_label = distr(gen);
+  dummy_block.header.is_null = true;
+
+  // The server sees a standard Path ORAM read/evict cycle, but it
+  // doesn't pollute your stash because it fails to find the DUMMY_BLOCK_ID
+  write_block(dummy_block, false);
 }

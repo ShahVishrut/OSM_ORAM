@@ -1,10 +1,14 @@
 #include "client.h"
 
 #include <cstdlib>
+#include <cmath>
 
 size_t Client::size(uint64_t key) {
+  // --- PADDING UPDATE: Reset access counter ---
+  this->current_op_accesses = 0;
+  
   if (root.is_null) {
-    return 0;
+    return 0; // No accesses made, safe to return
   }
 
   std::vector<ORAMBlock> history;
@@ -56,11 +60,20 @@ size_t Client::size(uint64_t key) {
     }
   }
 
+  // --- PADDING UPDATE: Pad operation before returning ---
+  if (this->tree_size > 0) {
+    // 2 accesses (read down, write up) per node in the worst-case path
+    pad_operation(get_max_tree_height() * 2);
+  }
+
   return result;
 }
 
 std::vector<uint64_t> Client::find(uint64_t key, uint32_t i, uint32_t j) {
-  if (root.is_null) return {};
+  // --- PADDING UPDATE: Reset access counter ---
+  this->current_op_accesses = 0;
+  
+  if (root.is_null) return {}; // No accesses made, safe to return
 
   std::vector<ORAMBlock> common_path;
   ORAMBlock cur_read;
@@ -335,10 +348,20 @@ std::vector<uint64_t> Client::find(uint64_t key, uint32_t i, uint32_t j) {
     }
   }
 
+  // --- PADDING UPDATE: Pad operation before returning ---
+  if (this->tree_size > 0) {
+    // Equation based on max_depth limits and result sizes: 
+    // Double it because of the read-down and write-back cycle
+    pad_operation(((2 * get_max_tree_height()) + (j - i + 1)) * 2);
+  }
+
   return result;
 }
 
 void Client::insert(uint64_t key, uint64_t value) {
+  // --- PADDING UPDATE: Reset access counter ---
+  this->current_op_accesses = 0;
+  
   // --------------------------------------------------------------------------
   // Phase 1: Base case - Empty tree
   // --------------------------------------------------------------------------
@@ -349,6 +372,11 @@ void Client::insert(uint64_t key, uint64_t value) {
     to_write.data.key = key;
     to_write.data.value = value;
     root = write_block(to_write, true).header;
+    
+    // --- PADDING UPDATE: Increment tree size and pad early return ---
+    this->tree_size++;
+    pad_operation(get_max_tree_height() * 2);
+    
     return;
   }
 
@@ -367,7 +395,7 @@ void Client::insert(uint64_t key, uint64_t value) {
 
     // Go Right
     if (key > cur_read.data.key ||
-        key == cur_read.data.key && value > cur_read.data.value) {
+        (key == cur_read.data.key && value > cur_read.data.value)) {
       if (cur_read.data.r_child_ptr.is_null) {
         ORAMBlock to_write;
         to_write.header.block_id = next_available_block_id();
@@ -377,6 +405,9 @@ void Client::insert(uint64_t key, uint64_t value) {
 
         avl_history.back().data.r_child_ptr = to_write.header;
         avl_history.push_back(to_write);
+        
+        // --- PADDING UPDATE: Node uniquely created ---
+        this->tree_size++;
         break;
       } else {
         cur_read.header = cur_read.data.r_child_ptr;
@@ -384,7 +415,7 @@ void Client::insert(uint64_t key, uint64_t value) {
 
     // Go Left
     } else if (key < cur_read.data.key ||
-               key == cur_read.data.key && value < cur_read.data.value) {
+               (key == cur_read.data.key && value < cur_read.data.value)) {
       if (cur_read.data.l_child_ptr.is_null) {
         ORAMBlock to_write;
         to_write.header.block_id = next_available_block_id();
@@ -394,6 +425,9 @@ void Client::insert(uint64_t key, uint64_t value) {
 
         avl_history.back().data.l_child_ptr = to_write.header;
         avl_history.push_back(to_write);
+        
+        // --- PADDING UPDATE: Node uniquely created ---
+        this->tree_size++;
         break;
       } else {
         cur_read.header = cur_read.data.l_child_ptr;
@@ -527,9 +561,17 @@ void Client::insert(uint64_t key, uint64_t value) {
       root.leaf_label = new_leaf_label;
     }
   }
+
+  // --- PADDING UPDATE: Pad operation before returning ---
+  if (this->tree_size > 0) {
+    pad_operation(get_max_tree_height() * 2);
+  }
 }
 
 bool Client::remove(uint64_t key, uint64_t value) {
+  // --- PADDING UPDATE: Reset access counter ---
+  this->current_op_accesses = 0;
+  
   // --------------------------------------------------------------------------
   // Phase 1: Base case - Empty tree
   // --------------------------------------------------------------------------
@@ -581,6 +623,12 @@ bool Client::remove(uint64_t key, uint64_t value) {
         root.leaf_label = new_leaf_label;
       }
     }
+    
+    // --- PADDING UPDATE: Pad operation before early return ---
+    if (this->tree_size > 0) {
+      pad_operation(get_max_tree_height() * 6);
+    }
+    
     return false; 
   }
 
@@ -636,6 +684,9 @@ bool Client::remove(uint64_t key, uint64_t value) {
 
   // Pop the physically removed node from history
   avl_history.pop_back();
+  
+  // --- PADDING UPDATE: Track successful removal ---
+  this->tree_size--;
 
   // --- NEW: Capture original path IDs before rotations scramble them ---
   std::vector<uint32_t> orig_path_ids;
@@ -778,5 +829,23 @@ bool Client::remove(uint64_t key, uint64_t value) {
     }
   }
 
+  // --- PADDING UPDATE: Pad operation before returning ---
+  if (this->tree_size > 0) {
+    pad_operation(get_max_tree_height() * 6);
+  }
+
   return true;
+}
+
+size_t Client::get_max_tree_height() {
+  if (this->tree_size == 0) return 0;
+  // Using 1.45 to account for the 1.4404... coefficient 
+  // and the additive constant.
+  return std::ceil(1.45 * std::log2(this->tree_size + 2));
+}
+
+void Client::pad_operation(size_t target_accesses) {
+  while (this->current_op_accesses < target_accesses) {
+    perform_dummy_access();
+  }
 }
