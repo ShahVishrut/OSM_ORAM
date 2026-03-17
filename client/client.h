@@ -89,6 +89,11 @@ public:
     std::vector<uint64_t> find(uint64_t key, uint32_t i, uint32_t j);
     bool remove(uint64_t key, uint64_t value);
 
+    // Expose server metrics to the testing driver
+    size_t get_server_accesses() const {
+        return server->get_total_accesses(); // Adjust 'server' to match your member variable name
+    }
+
 private:
     // --- Core Path ORAM Operations ---
     ORAMBlock write_block(ORAMBlock to_write, bool write);

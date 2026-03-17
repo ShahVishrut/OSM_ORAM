@@ -2,6 +2,8 @@
 
 #include <cstdlib>
 #include <cmath>
+#include <algorithm>
+#include <iostream>
 
 size_t Client::size(uint64_t key) {
   // --- PADDING UPDATE: Reset access counter ---
@@ -354,7 +356,7 @@ std::vector<uint64_t> Client::find(uint64_t key, uint32_t i, uint32_t j) {
     // Double it because of the read-down and write-back cycle
     pad_operation(((2 * get_max_tree_height()) + (j - i + 1)) * 2);
   }
-
+  std::sort(result.begin(), result.end());
   return result;
 }
 
@@ -578,6 +580,7 @@ bool Client::remove(uint64_t key, uint64_t value) {
   if (root.is_null) return false;
 
   std::vector<ORAMBlock> avl_history;
+  std::vector<bool> path_went_right; // FIX 1: Rotation-proof path tracking
   ORAMBlock cur_read;
   cur_read.header = root;
   
@@ -594,11 +597,13 @@ bool Client::remove(uint64_t key, uint64_t value) {
        (key == cur_read.data.key && value > cur_read.data.value)) {
       if (cur_read.data.r_child_ptr.is_null) break; 
       cur_read.header = cur_read.data.r_child_ptr;
+      path_went_right.push_back(true);
 
     } else if (key < cur_read.data.key || 
               (key == cur_read.data.key && value < cur_read.data.value)) {
       if (cur_read.data.l_child_ptr.is_null) break; 
       cur_read.header = cur_read.data.l_child_ptr;
+      path_went_right.push_back(false);
 
     } else {
       target_index = avl_history.size() - 1;
@@ -607,6 +612,7 @@ bool Client::remove(uint64_t key, uint64_t value) {
   }
 
   // Safely write back if target is not found to prevent ORAM data loss
+  // (Reverted to original logic)
   if (target_index == -1) {
     for (int index = avl_history.size() - 1; index >= 0; index--) {
       uint32_t new_leaf_label = write_block(avl_history[index], true).header.leaf_label;
@@ -624,11 +630,9 @@ bool Client::remove(uint64_t key, uint64_t value) {
       }
     }
     
-    // --- PADDING UPDATE: Pad operation before early return ---
     if (this->tree_size > 0) {
       pad_operation(get_max_tree_height() * 6);
     }
-    
     return false; 
   }
 
@@ -644,12 +648,14 @@ bool Client::remove(uint64_t key, uint64_t value) {
     cur_read.header = avl_history[target_index].data.r_child_ptr;
     cur_read = write_block(cur_read, false);
     avl_history.push_back(cur_read);
+    path_went_right.push_back(true);
 
     // Go all the way left to find the minimum of the right subtree
     while (!cur_read.data.l_child_ptr.is_null) {
       cur_read.header = cur_read.data.l_child_ptr;
       cur_read = write_block(cur_read, false);
       avl_history.push_back(cur_read);
+      path_went_right.push_back(false);
     }
 
     remove_index = avl_history.size() - 1;
@@ -672,27 +678,17 @@ bool Client::remove(uint64_t key, uint64_t value) {
     root = child_ptr;
   } else {
     // Correct boolean assignment for Left vs Right child physical removal
-    if (!avl_history[remove_index - 1].data.l_child_ptr.is_null &&
-        avl_history[remove_index - 1].data.l_child_ptr.block_id == removed_node_block_id) {
-      avl_history[remove_index - 1].data.l_child_ptr = child_ptr;
-      physically_removed_from_right = false; 
-    } else {
-      physically_removed_from_right = true;
+    physically_removed_from_right = path_went_right[remove_index - 1];
+    if (physically_removed_from_right) {
       avl_history[remove_index - 1].data.r_child_ptr = child_ptr;
+    } else {
+      avl_history[remove_index - 1].data.l_child_ptr = child_ptr;
     }
   }
 
   // Pop the physically removed node from history
   avl_history.pop_back();
-  
-  // --- PADDING UPDATE: Track successful removal ---
   this->tree_size--;
-
-  // --- NEW: Capture original path IDs before rotations scramble them ---
-  std::vector<uint32_t> orig_path_ids;
-  for (const auto& block : avl_history) {
-    orig_path_ids.push_back(block.header.block_id);
-  }
 
   // --------------------------------------------------------------------------
   // Phase 4: Reverse traverse, update augmented stats, and rebalance tree
@@ -700,13 +696,8 @@ bool Client::remove(uint64_t key, uint64_t value) {
   for (int i = remove_index - 1; i >= 0; i--) {
     ORAMBlock P = avl_history[i];
     
-    bool is_right_child = false;
-    if (i == remove_index - 1) {
-      is_right_child = physically_removed_from_right;
-    } else {
-      // Rotation-safe check using original path IDs
-      is_right_child = (!P.data.r_child_ptr.is_null && P.data.r_child_ptr.block_id == orig_path_ids[i + 1]);
-    }
+    // FIX 1: Use path_went_right boolean instead of ID matching
+    bool is_right_child = (i == remove_index - 1) ? physically_removed_from_right : path_went_right[i];
 
     // --- Inject the shifted child into the history if necessary ---
     if (i == remove_index - 1 && !child_ptr.is_null) {
@@ -728,8 +719,23 @@ bool Client::remove(uint64_t key, uint64_t value) {
       c_height = 1 + std::max(C.data.l_height, C.data.r_height);
       c_min_key = (C.data.l_height == 0) ? C.data.key : C.data.l_min_key_subtree;
       c_max_key = (C.data.r_height == 0) ? C.data.key : C.data.r_max_key_subtree;
-      c_min_count = (C.data.l_height == 0) ? 1 + C.data.l_same_key_size + C.data.r_same_key_size : C.data.l_min_key_count;
-      c_max_count = (C.data.r_height == 0) ? 1 + C.data.l_same_key_size + C.data.r_same_key_size : C.data.r_max_key_count;
+      if (C.data.l_height == 0) {
+        c_min_count = 1 + C.data.l_same_key_size + C.data.r_same_key_size;
+      } else {
+        c_min_count = C.data.l_min_key_count;
+        if (C.data.l_min_key_subtree == C.data.key) {
+          c_min_count += 1 + C.data.r_same_key_size;
+        }
+      }
+
+      if (C.data.r_height == 0) {
+        c_max_count = 1 + C.data.l_same_key_size + C.data.r_same_key_size;
+      } else {
+        c_max_count = C.data.r_max_key_count;
+        if (C.data.r_max_key_subtree == C.data.key) {
+          c_max_count += 1 + C.data.l_same_key_size;
+        }
+      }
     }
 
     // --- Apply stats to the local copy (P) ---
@@ -770,40 +776,53 @@ bool Client::remove(uint64_t key, uint64_t value) {
     if (std::abs(balance_factor) > 1) {
       bool right_heavy = balance_factor > 1;
       
+      // FIX 3: Cache the live child to prevent stale ORAM fetches during cascade
       ORAMBlock heavy_child;
-      heavy_child.header = right_heavy ? avl_history[i].data.r_child_ptr : avl_history[i].data.l_child_ptr;
-      heavy_child = write_block(heavy_child, false);
-      avl_history.insert(avl_history.begin() + i + 1, heavy_child);
+      uint32_t target_child_id = right_heavy ? avl_history[i].data.r_child_ptr.block_id : avl_history[i].data.l_child_ptr.block_id;
+      
+      if (i + 1 < avl_history.size() && avl_history[i + 1].header.block_id == target_child_id) {
+          heavy_child = avl_history[i + 1];
+      } else {
+          heavy_child.header = right_heavy ? avl_history[i].data.r_child_ptr : avl_history[i].data.l_child_ptr;
+          heavy_child = write_block(heavy_child, false);
+          avl_history.insert(avl_history.begin() + i + 1, heavy_child);
+      }
 
       int child_balance = heavy_child.data.r_height - heavy_child.data.l_height;
 
       if (right_heavy) {
-        if (child_balance < 0) { // Double Rotation (Right-Left)
+        if (child_balance < 0) { 
           ORAMBlock heavy_grandchild;
-          heavy_grandchild.header = avl_history[i + 1].data.l_child_ptr;
-          heavy_grandchild = write_block(heavy_grandchild, false);
-          avl_history.insert(avl_history.begin() + i + 2, heavy_grandchild);
+          uint32_t target_grandchild_id = heavy_child.data.l_child_ptr.block_id;
+          if (i + 2 < avl_history.size() && avl_history[i + 2].header.block_id == target_grandchild_id) {
+              heavy_grandchild = avl_history[i + 2];
+          } else {
+              heavy_grandchild.header = heavy_child.data.l_child_ptr;
+              heavy_grandchild = write_block(heavy_grandchild, false);
+              avl_history.insert(avl_history.begin() + i + 2, heavy_grandchild);
+          }
           rotate_right_left(avl_history, i);
-        } else { // Single Rotation (Right-Right)
-          rotate_right_right(avl_history, i);
-        }
+        } else { rotate_right_right(avl_history, i); }
       } else {
-        if (child_balance > 0) { // Double Rotation (Left-Right)
+        if (child_balance > 0) { 
           ORAMBlock heavy_grandchild;
-          heavy_grandchild.header = avl_history[i + 1].data.r_child_ptr;
-          heavy_grandchild = write_block(heavy_grandchild, false);
-          avl_history.insert(avl_history.begin() + i + 2, heavy_grandchild);
+          uint32_t target_grandchild_id = heavy_child.data.r_child_ptr.block_id;
+          if (i + 2 < avl_history.size() && avl_history[i + 2].header.block_id == target_grandchild_id) {
+              heavy_grandchild = avl_history[i + 2];
+          } else {
+              heavy_grandchild.header = heavy_child.data.r_child_ptr;
+              heavy_grandchild = write_block(heavy_grandchild, false);
+              avl_history.insert(avl_history.begin() + i + 2, heavy_grandchild);
+          }
           rotate_left_right(avl_history, i);
-        } else { // Single Rotation (Left-Left)
-          rotate_left_left(avl_history, i);
-        }
+        } else { rotate_left_left(avl_history, i); }
       }
     }
   }
 
   // --------------------------------------------------------------------------
   // Phase 5: PathORAM Write-back
-  // Matches insert() behavior exactly as requested (Index-1 and Index-2)
+  // (Reverted back to the original hardcoded index-1 / index-2 logic)
   // --------------------------------------------------------------------------
   for (int index = avl_history.size() - 1; index >= 0; index--) {
     uint32_t new_leaf_label = write_block(avl_history[index], true).header.leaf_label;

@@ -9,6 +9,8 @@ Server::Server(size_t bucket_size_bytes, size_t num_buckets) {
     this->bucket_size_bytes = bucket_size_bytes;
     this->num_buckets = num_buckets;
     this->database.resize(bucket_size_bytes * num_buckets);
+    this->read_count = 0;
+    this->write_count = 0;
 }
 
 // --------------------------------------------------------------------------
@@ -29,6 +31,9 @@ bool Server::write_buckets(std::vector<size_t> index_list,
             return false;
         }
     }
+
+    // TRACKING: Increment write count by the number of buckets written
+    this->write_count += index_list.size();
 
     // Copy data into database
     for (size_t i = 0; i < index_list.size(); i++) {
@@ -55,6 +60,9 @@ std::vector<uint8_t> Server::read_buckets(std::vector<size_t> index_list) {
             return {};
         }
     }
+
+    // TRACKING: Increment read count by the number of buckets read
+    this->read_count += index_list.size();
 
     std::vector<uint8_t> data(index_list.size() * bucket_size_bytes);
 

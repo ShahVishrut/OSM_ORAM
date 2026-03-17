@@ -23,6 +23,10 @@ public:
     // Reads a sequence of buckets (typically a root-to-leaf path).
     std::vector<uint8_t> read_buckets(std::vector<size_t> index_list);
 
+    // --- Performance Tracking ---
+    size_t get_total_accesses() const { return read_count + write_count; }
+    void reset_counters() { read_count = 0; write_count = 0; }
+
 private:
     // --- Physical Storage ---
     // Raw byte array representing the ORAM tree storage.
@@ -31,6 +35,10 @@ private:
     // --- Tree Configuration ---
     size_t bucket_size_bytes;
     size_t num_buckets;
+
+    // --- Metrics ---
+    size_t read_count = 0;
+    size_t write_count = 0;
 };
 
 #endif
